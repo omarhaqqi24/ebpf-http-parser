@@ -1,0 +1,63 @@
+<html>
+    <head>
+        <title>WEB OMAR CIHUYYYYY</title>
+    </head>
+    <body>
+        <h1>Ini Website Omar</h1>
+        <button onclick="getRequest()">GET</button>
+        <button onclick="postRequest()">POST</button>
+        <div id="response_print"></div>
+
+        <script>
+            const API_URL = "http://192.168.0.135";
+            const API_PORT = "8000"
+
+            async function getRequest() {
+                var result = ""
+
+                try {
+                    const response = await fetch(`${API_URL}:${API_PORT}/`, {
+                        method: "GET",
+                        headers: {
+                            "Accept": "application/json"
+                        }
+                    });
+
+                    const data = await response.json();
+                    result = JSON.stringify(data, null, 2)
+                    
+                } catch (err) {
+                    result = JSON.stringify({
+                        "success": false,
+                        "message": `client error : ${err}`
+                    }, null, 2)
+                }
+
+                document.getElementById("response_print").innerHTML = `<pre>${result}</pre>`
+            }
+
+            async function postRequest() {
+                var result = ""
+
+                try {
+                    const response = await fetch(`${API_URL}:${API_PORT}/123`, {
+                        method: "POST",
+                        headers: {
+                            "Accept": "application/json"
+                        }
+                    });
+
+                    const data = await response.json()
+                    result = JSON.stringify(data, null, 2)
+                } catch (err) {
+                    result = JSON.stringify({
+                        "success": false,
+                        "message": `client error : ${err}`
+                    }, null, 2)
+                }
+
+                document.getElementById("response_print").innerHTML = `<pre>${result}</pre>`
+            }
+        </script>
+    </body>
+</html>
