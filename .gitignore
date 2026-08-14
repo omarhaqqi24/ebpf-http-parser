@@ -1,4 +1,4 @@
-go/xdp_bpfeb*
+go/xdp_bpfe*
 go/xdp-sniffer
 go/*.csv
 .venv/
