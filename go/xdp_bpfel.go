@@ -16,6 +16,7 @@ import (
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
+	xdpMapEvents   = "events"
 	xdpProgXdpProg = "xdp_prog"
 )
 
@@ -68,6 +69,7 @@ type xdpProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdpMapSpecs struct {
+	Events *ebpf.MapSpec `ebpf:"events"`
 }
 
 // xdpVariableSpecs contains global variables before they are loaded into the kernel.
@@ -96,10 +98,13 @@ func (o *xdpObjects) Close() error {
 //
 // It can be passed to loadXdpObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdpMaps struct {
+	Events *ebpf.Map `ebpf:"events"`
 }
 
 func (m *xdpMaps) Close() error {
-	return _XdpClose()
+	return _XdpClose(
+		m.Events,
+	)
 }
 
 // xdpVariables contains all global variables after they have been loaded into the kernel.
