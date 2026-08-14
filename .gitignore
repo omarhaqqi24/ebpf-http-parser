@@ -1,0 +1,5 @@
+go/xdp_bpfeb*
+go/xdp-sniffer
+go/*.csv
+.venv/
+web/__pycache__/

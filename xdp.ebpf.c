@@ -1,156 +1,300 @@
+//go:build ignore
+
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
 #define ETH_P_IP 0x0800
+#define HTTP_SERVER_PORT 8000
+
 char LICENSE[] SEC("license") = "GPL";
 
-SEC("xdp")
-int xdp_prog(struct xdp_md *ctx) {
-    bool IS_DEBUG = false;
 
+/*
+ * Event sent from kernel space
+ * to user space.
+ */
+struct http_event {
+    __u8 src_mac[6];
+    __u8 dst_mac[6];
+
+    __u32 src_ip;
+    __u32 dst_ip;
+
+    __u16 src_port;
+    __u16 dst_port;
+
+    char method[8];
+    char url[64];
+    char version[16];
+};
+
+
+/*
+ * Ring buffer
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);
+} events SEC(".maps");
+
+
+SEC("xdp")
+int xdp_prog(struct xdp_md *ctx)
+{
     void *data = (void *)(long)ctx->data;
     void *data_end = (void *)(long)ctx->data_end;
 
-    // ETHERNET HEADER CHECK
+
+    /*
+     * =========================
+     * Ethernet
+     * =========================
+     */
 
     struct ethhdr *eth = data;
 
-    if ((void *)(eth + 1) > data_end) {
-        if (IS_DEBUG) bpf_printk("[PASS] Ethernet header larger than expected");
+    if ((void *)(eth + 1) > data_end)
         return XDP_PASS;
-    }
-    
-    if (eth->h_proto != bpf_htons(ETH_P_IP)) {
-        if (IS_DEBUG) bpf_printk("[PASS] Packet is not IPv4 packet");
-        return XDP_PASS;
-    }
 
-    // IP HEADER CHECK
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
+        return XDP_PASS;
+
+
+    /*
+     * =========================
+     * IPv4
+     * =========================
+     */
 
     struct iphdr *ip = (void *)(eth + 1);
 
-    if ((void *)(ip + 1) > data_end) {
-        if (IS_DEBUG) bpf_printk("[PASS] IP header larger than expected");
+    if ((void *)(ip + 1) > data_end)
         return XDP_PASS;
-    }
 
-    if (ip->protocol != IPPROTO_TCP) {
-        if (IS_DEBUG) bpf_printk("[PASS] Packet is not TCP packet");
+    if (ip->ihl < 5)
         return XDP_PASS;
-    }
 
-    // TCP HEADER CHECK
-
-    __u32 ip_hdr_len = ip->ihl * 4;
-
-    struct tcphdr *tcp = (void *)ip + ip_hdr_len;
-
-    if ((void *)(tcp+1) > data_end)
-    {
-        if (IS_DEBUG) bpf_printk("[PASS] TCP header larger than expected");
+    if (ip->protocol != IPPROTO_TCP)
         return XDP_PASS;
-    }
 
-    // TCP PAYLOAD CHECK (HTTP REQUEST)
+    __u32 ip_len = (__u32)ip->ihl * 4;
 
-    __u32 tcp_hdr_len = tcp->doff * 4;
-
-    char *tcp_payload = (void *)tcp + tcp_hdr_len;
-
-    if ((void *)(tcp_payload + 4) > data_end)
-    {
-        if (IS_DEBUG) bpf_printk("[PASS] Packet is less than 4 bytes");
+    if ((void *)ip + ip_len > data_end)
         return XDP_PASS;
-    }
-    
-    // VERIFY HTTP PACKET
 
-    // Port check
 
-    __u32 HTTP_SERVER_PORT = 8000;
+    /*
+     * =========================
+     * TCP
+     * =========================
+     */
 
-    if (bpf_ntohs(tcp->dest) != 8000)
-    {
-        if (IS_DEBUG) bpf_printk("[PASS] Packet destination port is not %d", HTTP_SERVER_PORT);
+    struct tcphdr *tcp = (void *)ip + ip_len;
+
+    if ((void *)(tcp + 1) > data_end)
         return XDP_PASS;
-    }
-    
-    // HTTP PARSING
 
-    __u8 *ip_dst = (__u8 *)&ip->daddr;
-    __u8 *ip_src = (__u8 *)&ip->saddr;
+    if (tcp->doff < 5)
+        return XDP_PASS;
 
-    char http_method[8] = {};
-    int method_start = 0;
-    int method_end = -1;
-    
-    for (int i = 0; i < sizeof(http_method) - 1; i++)
-    {
-        if ((void *)(tcp_payload + i + 1) > data_end) break;
-        if (tcp_payload[i] == ' ') {
-            method_end = i;
+    __u32 tcp_len = (__u32)tcp->doff * 4;
+
+    if ((void *)tcp + tcp_len > data_end)
+        return XDP_PASS;
+
+
+    /*
+     * =========================
+     * HTTP server filter
+     * =========================
+     */
+
+    if (bpf_ntohs(tcp->dest) != HTTP_SERVER_PORT)
+        return XDP_PASS;
+
+
+    /*
+     * =========================
+     * Payload
+     * =========================
+     */
+
+    __u8 *payload = (void *)tcp + tcp_len;
+
+    if (payload >= (__u8 *)data_end)
+        return XDP_PASS;
+
+
+    /*
+     * =========================
+     * Reserve ring-buffer event
+     * =========================
+     *
+     * IMPORTANT:
+     *
+     * We allocate the HTTP event directly
+     * from the ring buffer instead of
+     * creating large arrays on the BPF stack.
+     */
+
+    struct http_event *event;
+
+    event = bpf_ringbuf_reserve(
+        &events,
+        sizeof(*event),
+        0
+    );
+
+    if (!event)
+        return XDP_PASS;
+
+
+    /*
+     * =========================
+     * MAC addresses
+     * =========================
+     */
+
+    __builtin_memcpy(
+        event->src_mac,
+        eth->h_source,
+        6
+    );
+
+    __builtin_memcpy(
+        event->dst_mac,
+        eth->h_dest,
+        6
+    );
+
+
+    /*
+     * =========================
+     * IP addresses
+     * =========================
+     *
+     * Keep network byte order.
+     * Go converts it later.
+     */
+
+    event->src_ip = ip->saddr;
+    event->dst_ip = ip->daddr;
+
+
+    /*
+     * =========================
+     * TCP ports
+     * =========================
+     *
+     * Convert to host byte order.
+     */
+
+    event->src_port = bpf_ntohs(tcp->source);
+    event->dst_port = bpf_ntohs(tcp->dest);
+
+
+    /*
+     * =========================
+     * HTTP Method
+     * =========================
+     */
+
+    __u32 method_end = 0;
+    bool method_found = false;
+
+    #pragma unroll
+    for (int i = 0; i < 7; i++) {
+
+        if ((void *)(payload + i + 1) > data_end)
+            break;
+
+        if (payload[i] == ' ') {
+            method_end = (__u32)i;
+            method_found = true;
             break;
         }
 
-        http_method[i] = tcp_payload[i];
+        event->method[i] = payload[i];
     }
 
-    char http_url[128] = {};
-    int url_start = method_end+1;
-    int url_end = -1;
-
-    for (int i = 0; i < sizeof(http_url) - 1; i++)
-    {
-        if ((void *)(tcp_payload + url_start + i + 1) > data_end)
-            break;
-        if (tcp_payload[url_start + i] == ' ')
-        {
-            url_end = url_start + i;
-            break;
-        }
-        
-        http_url[i] = tcp_payload[url_start + i];
+    if (!method_found) {
+        bpf_ringbuf_discard(event, 0);
+        return XDP_PASS;
     }
 
-    char http_version[16] = {};
-    int version_start = url_end + 1;
-    int version_end = -1;
 
-    for (int i = 0; i < sizeof(http_version) - 1; i++)
-    {
-        if ((void *)(tcp_payload + version_start + i + 1) > data_end)
+    /*
+     * =========================
+     * URL
+     * =========================
+     */
+
+    __u32 url_start = method_end + 1;
+    __u32 url_end = 0;
+    bool url_found = false;
+
+    #pragma unroll
+    for (int i = 0; i < 63; i++) {
+
+        __u32 offset = url_start + (__u32)i;
+
+        if ((void *)(payload + offset + 1) > data_end)
             break;
-        
-        if (tcp_payload[version_start+i] == '\r')
-        {
-            version_end = version_start + i;
+
+        if (payload[offset] == ' ') {
+            url_end = offset;
+            url_found = true;
             break;
         }
 
-        http_version[i] = tcp_payload[version_start + i];
-    }    
-    
-    bpf_printk("==================================");
-    bpf_printk("[RECEIVED] IPv4 TCP Packets");
-    bpf_printk("SRC     = %d.%d.%d.%d:%d", ip_src[0], ip_src[1], ip_src[2], ip_src[3], bpf_ntohs(tcp->source));
-    bpf_printk("DST     = %d.%d.%d.%d:%d", ip_dst[0], ip_dst[1], ip_dst[2], ip_dst[3], bpf_ntohs(tcp->dest));
-    bpf_printk("PORT    = TCP");
-    bpf_printk("METHOD  = %s", http_method);
-    bpf_printk("URL     = %s", http_url);
-    bpf_printk("VERSION = %s", http_version);
+        event->url[i] = payload[offset];
+    }
 
-    bpf_printk("==================================");
+    if (!url_found) {
+        bpf_ringbuf_discard(event, 0);
+        return XDP_PASS;
+    }
+
+
+    /*
+     * =========================
+     * HTTP Version
+     * =========================
+     */
+
+    __u32 version_start = url_end + 1;
+    bool version_found = false;
+
+    #pragma unroll
+    for (int i = 0; i < 15; i++) {
+
+        __u32 offset = version_start + (__u32)i;
+
+        if ((void *)(payload + offset + 1) > data_end)
+            break;
+
+        if (payload[offset] == '\r') {
+            version_found = true;
+            break;
+        }
+
+        event->version[i] = payload[offset];
+    }
+
+    if (!version_found) {
+        bpf_ringbuf_discard(event, 0);
+        return XDP_PASS;
+    }
+
+
+    /*
+     * =========================
+     * Submit event
+     * =========================
+     */
+
+    bpf_ringbuf_submit(event, 0);
 
     return XDP_PASS;
-}
-
-char copy_until(int start, int *end, char stop, int size)
-{
-    char data[size] = {};
-    for (int i = 0; i < sizeof(data) - 1; i++)
-    {
-        /* code */
-    }
-    
 }
