@@ -41,6 +41,8 @@ type httpEvent struct {
 	Method  [8]byte
 	URL     [64]byte
 	Version [16]byte
+
+	HeaderName [16]byte
 }
 
 /*
@@ -215,6 +217,7 @@ func main() {
 			"method",
 			"url",
 			"version",
+			"headerName",
 		})
 
 		if err != nil {
@@ -341,6 +344,10 @@ func main() {
 			event.Version[:],
 		)
 
+		headerName := cString(
+			event.HeaderName[:],
+		)
+
 		/*
 		 * =========================
 		 * Print event
@@ -348,7 +355,7 @@ func main() {
 		 */
 
 		log.Printf(
-			"%s:%d -> %s:%d | %s %s %s | %s -> %s",
+			"%s:%d -> %s:%d | %s %s %s | %s -> %s | %s",
 
 			srcIP,
 			event.SrcPort,
@@ -362,6 +369,8 @@ func main() {
 
 			srcMAC,
 			dstMAC,
+
+			headerName,
 		)
 
 		/*
@@ -393,6 +402,8 @@ func main() {
 			method,
 			url,
 			version,
+
+			headerName,
 		})
 
 		if err != nil {

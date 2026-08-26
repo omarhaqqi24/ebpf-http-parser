@@ -9,7 +9,6 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-
 /*
  * Event sent from kernel space
  * to user space.
@@ -27,6 +26,8 @@ struct http_event {
     char method[8];
     char url[64];
     char version[16];
+    char header_name[16];
+    // char header_value[3][16];
 };
 
 
@@ -264,6 +265,7 @@ int xdp_prog(struct xdp_md *ctx)
      */
 
     __u32 version_start = url_end + 1;
+    __u32 version_end = 0;
     bool version_found = false;
 
     #pragma unroll
@@ -275,6 +277,7 @@ int xdp_prog(struct xdp_md *ctx)
             break;
 
         if (payload[offset] == '\r') {
+            version_end = offset;
             version_found = true;
             break;
         }
@@ -287,6 +290,136 @@ int xdp_prog(struct xdp_md *ctx)
         return XDP_PASS;
     }
 
+    // HTTP Header
+
+    // Loop 1
+
+    __u32 h1_start = version_end + 2;
+    __u32 h1_end = 0;
+    bool h1_found = false;
+
+    #pragma unroll
+    for (int i = 0; i < 15; i++)
+    {
+        __u32 offset = h1_start + (__u32)i;
+
+        if ((void *) (payload + offset + 1) > data_end)
+            break;
+
+        if (payload[offset] == ':') {
+            h1_end = offset;
+            h1_found = true;
+            break;
+        }
+        
+        event->header_name[i] = payload[offset];
+    }
+
+    // __u32 v1_start = h1_end + 2;
+    // __u32 v1_end = 0;
+    // bool v1_found = false;
+
+    // #pragma unroll
+    // for (int i = 0; i < 15; i++) {
+    //     __u32 offset = v1_start + (__u32)i;
+
+    //     if ((void *) (payload + i + 1) > data_end)
+    //         break;
+        
+    //     if (payload[offset] == '\r') {
+    //         v1_end = offset;
+    //         v1_found = true;
+    //         break;
+    //     }
+
+    //     event->header_value[0][i] = payload[offset];
+    // }
+
+    // // Loop 2
+
+    // __u32 h2_start = v1_end + 2;
+    // __u32 h2_end = 0;
+    // bool h2_found = false;
+
+    // #pragma unroll
+    // for (int i = 0; i < 15; i++)
+    // {
+    //     __u32 offset = h2_start + (__u32)i;
+
+    //     if ((void *) (payload + offset + 1) > data_end)
+    //         break;
+
+    //     if (payload[offset] == ':') {
+    //         h2_end = offset;
+    //         h2_found = true;
+    //         break;
+    //     }
+        
+    //     event->header_name[1][i] = payload[offset];
+    // }
+
+    // __u32 v2_start = h2_end + 2;
+    // __u32 v2_end = 0;
+    // bool v2_found = false;
+
+    // #pragma unroll
+    // for (int i = 0; i < 15; i++) {
+    //     __u32 offset = v2_start + (__u32)i;
+
+    //     if ((void *) (payload + i + 1) > data_end)
+    //         break;
+        
+    //     if (payload[offset] == '\r') {
+    //         v2_end = offset;
+    //         v2_found = true;
+    //         break;
+    //     }
+
+    //     event->header_value[1][i] = payload[offset];
+    // }
+
+    // // Loop 3
+
+    // __u32 h3_start = v2_end + 2;
+    // __u32 h3_end = 0;
+    // bool h3_found = false;
+
+    // #pragma unroll
+    // for (int i = 0; i < 15; i++)
+    // {
+    //     __u32 offset = h3_start + (__u32)i;
+
+    //     if ((void *) (payload + offset + 1) > data_end)
+    //         break;
+
+    //     if (payload[offset] == ':') {
+    //         h3_end = offset;
+    //         h3_found = true;
+    //         break;
+    //     }
+        
+    //     event->header_name[1][i] = payload[offset];
+    // }
+
+    // __u32 v3_start = h3_end + 2;
+    // __u32 v3_end = 0;
+    // bool v3_found = false;
+
+    // #pragma unroll
+    // for (int i = 0; i < 15; i++) {
+    //     __u32 offset = v3_start + (__u32)i;
+
+    //     if ((void *) (payload + i + 1) > data_end)
+    //         break;
+        
+    //     if (payload[offset] == '\r') {
+    //         v3_end = offset;
+    //         v3_found = true;
+    //         break;
+    //     }
+
+    //     event->header_value[1][i] = payload[offset];
+    // }
 
     /*
      * =========================
