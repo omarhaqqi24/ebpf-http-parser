@@ -26,7 +26,9 @@ struct http_event {
     char method[8];
     char url[64];
     char version[16];
-    char header_name[16];
+    char http_header[256];
+    // char header_line[32];
+    // char header_value[16];
     // char header_value[3][16];
 };
 
@@ -292,142 +294,74 @@ int xdp_prog(struct xdp_md *ctx)
 
     // HTTP Header
 
-    // Loop 1
+    /*
+    * =========================
+    * HTTP Header 1
+    * =========================
+    */
 
-    __u32 h1_start = version_end + 2;
-    __u32 h1_end = 0;
-    bool h1_found = false;
+    // __u32 h1_start = version_end + 2;
+    // __u32 h1_end = 0;
+    // bool h1_finished = false;
 
-    #pragma unroll
-    for (int i = 0; i < 15; i++)
+    // int i;
+
+    // bpf_for(i, 0, 32)
+    // {
+    //     __u32 offset = h1_start + (__u32)i;
+
+    //     if ((void *)(payload + offset + 1) > data_end)
+    //         break;
+
+    //     __u8 c = payload[offset];
+
+    //     if (c == '\r') {
+    //         h1_end = offset;
+    //         h1_finished = true;
+    //         break;
+    //     }
+
+    //     event->header_line[i] = c;
+    // }
+
+    __u32 header_start = version_end + 2;
+
+    int i;
+
+    bpf_for(i, 0, 128)
     {
-        __u32 offset = h1_start + (__u32)i;
+        __u32 offset =
+            header_start + (__u32)i;
 
-        if ((void *) (payload + offset + 1) > data_end)
+        if ((void *)(payload + offset + 1) > data_end)
             break;
 
-        if (payload[offset] == ':') {
-            h1_end = offset;
-            h1_found = true;
-            break;
-        }
-        
-        event->header_name[i] = payload[offset];
+        __u8 c = payload[offset];
+
+        /*
+        * End of HTTP headers:
+        *
+        * \r\n\r\n
+        *
+        * Untuk tahap pertama kita cukup
+        * menyimpan semuanya sampai packet
+        * tidak memiliki data lagi atau buffer
+        * mencapai 128 byte.
+        */
+
+        event->http_header[i] = c;
     }
 
-    // __u32 v1_start = h1_end + 2;
-    // __u32 v1_end = 0;
-    // bool v1_found = false;
-
-    // #pragma unroll
-    // for (int i = 0; i < 15; i++) {
-    //     __u32 offset = v1_start + (__u32)i;
-
-    //     if ((void *) (payload + i + 1) > data_end)
-    //         break;
-        
-    //     if (payload[offset] == '\r') {
-    //         v1_end = offset;
-    //         v1_found = true;
-    //         break;
-    //     }
-
-    //     event->header_value[0][i] = payload[offset];
-    // }
-
-    // // Loop 2
-
-    // __u32 h2_start = v1_end + 2;
-    // __u32 h2_end = 0;
-    // bool h2_found = false;
-
-    // #pragma unroll
-    // for (int i = 0; i < 15; i++)
-    // {
-    //     __u32 offset = h2_start + (__u32)i;
-
-    //     if ((void *) (payload + offset + 1) > data_end)
-    //         break;
-
-    //     if (payload[offset] == ':') {
-    //         h2_end = offset;
-    //         h2_found = true;
-    //         break;
-    //     }
-        
-    //     event->header_name[1][i] = payload[offset];
-    // }
-
-    // __u32 v2_start = h2_end + 2;
-    // __u32 v2_end = 0;
-    // bool v2_found = false;
-
-    // #pragma unroll
-    // for (int i = 0; i < 15; i++) {
-    //     __u32 offset = v2_start + (__u32)i;
-
-    //     if ((void *) (payload + i + 1) > data_end)
-    //         break;
-        
-    //     if (payload[offset] == '\r') {
-    //         v2_end = offset;
-    //         v2_found = true;
-    //         break;
-    //     }
-
-    //     event->header_value[1][i] = payload[offset];
-    // }
-
-    // // Loop 3
-
-    // __u32 h3_start = v2_end + 2;
-    // __u32 h3_end = 0;
-    // bool h3_found = false;
-
-    // #pragma unroll
-    // for (int i = 0; i < 15; i++)
-    // {
-    //     __u32 offset = h3_start + (__u32)i;
-
-    //     if ((void *) (payload + offset + 1) > data_end)
-    //         break;
-
-    //     if (payload[offset] == ':') {
-    //         h3_end = offset;
-    //         h3_found = true;
-    //         break;
-    //     }
-        
-    //     event->header_name[1][i] = payload[offset];
-    // }
-
-    // __u32 v3_start = h3_end + 2;
-    // __u32 v3_end = 0;
-    // bool v3_found = false;
-
-    // #pragma unroll
-    // for (int i = 0; i < 15; i++) {
-    //     __u32 offset = v3_start + (__u32)i;
-
-    //     if ((void *) (payload + i + 1) > data_end)
-    //         break;
-        
-    //     if (payload[offset] == '\r') {
-    //         v3_end = offset;
-    //         v3_found = true;
-    //         break;
-    //     }
-
-    //     event->header_value[1][i] = payload[offset];
-    // }
-
     /*
-     * =========================
-     * Submit event
-     * =========================
-     */
+    * =========================
+    * Submit
+    * =========================
+    */
 
-    bpf_ringbuf_submit(event, 0);
+    bpf_ringbuf_submit(
+        event,
+        0
+    );
 
     return XDP_PASS;
 }
