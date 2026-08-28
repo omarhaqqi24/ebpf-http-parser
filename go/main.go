@@ -1,6 +1,6 @@
 package main
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -tags linux xdp ../xdp.ebpf.c -- -I../headers
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -tags linux xdp ../xdp.ebpf.c -- -I/usr/include
 
 import (
 	"bytes"
@@ -38,12 +38,13 @@ type httpEvent struct {
 
 	SrcPort uint16
 	DstPort uint16
+	PacketLen uint32
 
 	Method  [8]byte
 	URL     [64]byte
 	Version [16]byte
 
-	HTTPHeader [256]byte
+	HTTPHeader [1024]byte
 }
 
 /*
@@ -63,6 +64,7 @@ type HTTPRecord struct {
 
 	SrcPort uint16
 	DstPort uint16
+	PacketLen uint32
 
 	Method  string
 	URL     string
@@ -289,6 +291,7 @@ func writeCSV(
 		"dst_ip",
 		"src_port",
 		"dst_port",
+		"packet_len",
 		"method",
 		"url",
 		"version",
@@ -330,6 +333,10 @@ func writeCSV(
 
 			strconv.Itoa(
 				int(record.DstPort),
+			),
+
+			strconv.Itoa(
+				int(record.PacketLen),
 			),
 
 			record.Method,
@@ -408,7 +415,10 @@ func main() {
 	 * =====================================================
 	 */
 
-	ifaceName := "wlp3s0"
+	ifaceName := os.Getenv("XDP_INTERFACE")
+	if ifaceName == "" {
+		ifaceName = "ens18"
+	}
 
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -434,7 +444,7 @@ func main() {
 		},
 	)
 
-	if err != nil {
+	if err != nil { 
 
 		log.Fatalf(
 			"attaching XDP program: %v",
@@ -592,6 +602,8 @@ func main() {
 			SrcPort: event.SrcPort,
 
 			DstPort: event.DstPort,
+
+			PacketLen: event.PacketLen,
 
 			Method: cString(
 				event.Method[:],

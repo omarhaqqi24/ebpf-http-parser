@@ -6,6 +6,7 @@
 
 #define ETH_P_IP 0x0800
 #define HTTP_SERVER_PORT 8000
+#define HTTP_HEADER_SIZE 1024
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -22,11 +23,12 @@ struct http_event {
 
     __u16 src_port;
     __u16 dst_port;
+    __u32 packet_len;
 
     char method[8];
     char url[64];
     char version[16];
-    char http_header[256];
+    char http_header[HTTP_HEADER_SIZE];
     // char header_line[32];
     // char header_value[16];
     // char header_value[3][16];
@@ -195,6 +197,7 @@ int xdp_prog(struct xdp_md *ctx)
 
     event->src_port = bpf_ntohs(tcp->source);
     event->dst_port = bpf_ntohs(tcp->dest);
+    event->packet_len = (__u32)((__u8 *)data_end - (__u8 *)data);
 
 
     /*
@@ -328,15 +331,19 @@ int xdp_prog(struct xdp_md *ctx)
 
     int i;
 
-    bpf_for(i, 0, 128)
+    bpf_for(i, 0, HTTP_HEADER_SIZE)
     {
-        __u32 offset =
+        __u32 packet_offset =
+            (__u32)((__u8 *)payload - (__u8 *)data) +
             header_start + (__u32)i;
 
-        if ((void *)(payload + offset + 1) > data_end)
+        if (bpf_xdp_load_bytes(
+                ctx,
+                packet_offset,
+                &event->http_header[i],
+                1
+            ) < 0)
             break;
-
-        __u8 c = payload[offset];
 
         /*
         * End of HTTP headers:
@@ -349,7 +356,6 @@ int xdp_prog(struct xdp_md *ctx)
         * mencapai 128 byte.
         */
 
-        event->http_header[i] = c;
     }
 
     /*

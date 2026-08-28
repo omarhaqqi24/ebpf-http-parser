@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -12,16 +12,34 @@ app.add_middleware(
 )
 
 @app.get('/')
-def index():
+def index(request: Request):
+    headers = dict(request.headers)
+
+    print("GET headers:")
+    for name, value in headers.items():
+        print(f"{name}: {value}")
+
     return {
         "status": "success",
-        "message": "mantap"
+        "message": "mantap",
+        "headers": headers,
     }
 
 @app.post('/{id}')
-def store(id: int):
-    id_resp = 'cihuuuuyyy ' + str(id)
+async def store(id: int, request: Request):
+    headers = dict(request.headers)
+    body = await request.body()
+
+    print("POST headers:")
+    for name, value in headers.items():
+        print(f"{name}: {value}")
+
+    print(f"POST body size: {len(body)} bytes")
+
     return {
         "status": "success",
-        "message": id_resp
+        "message": "mantap",
+        "headers": headers,
+        "body_size": len(body),
+        "response_data": "R" * 2000,
     }

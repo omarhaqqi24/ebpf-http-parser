@@ -9,7 +9,7 @@
         <div id="response_print"></div>
 
         <script>
-            const API_URL = "http://10.158.242.211";
+            const API_URL = "http://10.34.211.178";
             const API_PORT = "8000"
 
             async function getRequest() {
@@ -22,6 +22,11 @@
                             "Accept": "application/json"
                         }
                     });
+
+                    console.log("Response headers:");
+                    for (const [name, value] of response.headers.entries()) {
+                        console.log(`${name}: ${value}`);
+                    }
 
                     const data = await response.json();
                     result = JSON.stringify(data, null, 2)
@@ -38,13 +43,16 @@
 
             async function postRequest() {
                 var result = ""
+                const requestBody = "P".repeat(4000)
 
                 try {
                     const response = await fetch(`${API_URL}:${API_PORT}/123`, {
                         method: "POST",
                         headers: {
-                            "Accept": "application/json"
-                        }
+                            "Accept": "application/json",
+                            "Content-Type": "text/plain"
+                        },
+                        body: requestBody
                     });
 
                     const data = await response.json()
