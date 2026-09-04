@@ -5,6 +5,7 @@ package socket
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -19,7 +20,7 @@ import (
 )
 
 const (
-	serverAddress = "127.0.0.1:8000"
+	serverAddress = "192.168.0.2:8000"
 )
 
 /*
@@ -31,10 +32,15 @@ const (
  */
 
 type socketEvent struct {
-	Timestamp    uint64
-	SocketCookie uint64
-	DataLen      uint32
-	Data         [256]byte
+	Timestamp          uint64
+	SocketCookie       uint64
+	SKBLength          uint32
+	InspectedLen       uint32
+	PatternFound       uint32
+	PatternOffset      uint32
+	MatcherStateBefore uint32
+	MatcherStateAfter  uint32
+	StreamOffset       uint32
 }
 
 // Run attaches the SOCKMAP programs and starts the TCP server.
@@ -90,28 +96,83 @@ func setupSocketHTTP() (*sockethttpObjects, *ringbuf.Reader, error) {
 // serveTCP receives eBPF events and accepts TCP connections until the process
 // is stopped.
 func serveTCP(reader *ringbuf.Reader, sockMap *ebpf.Map) {
-	closeReaderOnSignal(reader)
-
 	listener, err := net.Listen("tcp", serverAddress)
-
 	if err != nil {
 		log.Fatalf("starting TCP server: %v", err)
 	}
-
 	defer listener.Close()
+
 	log.Printf("Listening on %s", serverAddress)
+
+	/*
+	 * =====================================================
+	 * Signal handling
+	 * =====================================================
+	 */
+
+	signalChan := make(chan os.Signal, 1)
+
+	signal.Notify(
+		signalChan,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+
+	defer signal.Stop(signalChan)
+
+	/*
+	 * When Ctrl+C arrives:
+	 *
+	 * 1. Close the TCP listener.
+	 *    This unblocks listener.Accept().
+	 *
+	 * 2. Close the ring buffer.
+	 *    This unblocks reader.Read().
+	 */
+
+	go func() {
+		<-signalChan
+
+		log.Println("Stopping...")
+
+		listener.Close()
+		reader.Close()
+	}()
+
+	/*
+	 * =====================================================
+	 * Ring-buffer reader
+	 * =====================================================
+	 */
 
 	go readEvents(reader)
 
+	/*
+	 * =====================================================
+	 * Accept TCP connections
+	 * =====================================================
+	 */
+
 	for {
 		conn, err := listener.Accept()
+
 		if err != nil {
+
+			/*
+			 * listener.Close() was called during shutdown.
+			 */
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+
 			log.Printf("accept error: %v", err)
 			continue
 		}
 
 		go handleConnection(conn, sockMap)
 	}
+
+	log.Println("Socket HTTP monitor stopped.")
 }
 
 /*
@@ -151,10 +212,7 @@ func handleConnection(
 	tcpConn, ok := conn.(*net.TCPConn)
 
 	if !ok {
-		log.Println(
-			"connection is not TCP",
-		)
-
+		log.Println("connection is not TCP")
 		return
 	}
 
@@ -167,12 +225,10 @@ func handleConnection(
 	rawConn, err := tcpConn.SyscallConn()
 
 	if err != nil {
-
 		log.Printf(
 			"getting syscall connection: %v",
 			err,
 		)
-
 		return
 	}
 
@@ -180,19 +236,15 @@ func handleConnection(
 
 	err = rawConn.Control(
 		func(fd uintptr) {
-
 			socketFD = int(fd)
-
 		},
 	)
 
 	if err != nil {
-
 		log.Printf(
 			"getting socket FD: %v",
 			err,
 		)
-
 		return
 	}
 
@@ -200,13 +252,6 @@ func handleConnection(
 	 * =====================================================
 	 * Insert socket into SOCKMAP
 	 * =====================================================
-	 *
-	 * IMPORTANT:
-	 *
-	 * The key is currently always 0.
-	 *
-	 * This is intentional for our first
-	 * single-connection experiment.
 	 */
 
 	key := uint32(0)
@@ -232,32 +277,59 @@ func handleConnection(
 
 	/*
 	 * =====================================================
-	 * Normal TCP server
+	 * Receive the HTTP request.
+	 *
+	 * IMPORTANT:
+	 *
+	 * Do NOT assume one Read() == one HTTP request.
 	 * =====================================================
 	 */
 
 	buffer := make([]byte, 4096)
 
-	n, err := tcpConn.Read(buffer)
+	var request []byte
 
-	if err != nil {
+	for {
 
-		log.Printf(
-			"TCP read: %v",
-			err,
+		n, err := tcpConn.Read(buffer)
+
+		if err != nil {
+
+			log.Printf(
+				"TCP read: %v",
+				err,
+			)
+
+			return
+		}
+
+		if n == 0 {
+			return
+		}
+
+		request = append(
+			request,
+			buffer[:n]...,
 		)
 
-		return
-	}
+		log.Printf(
+			"Application received %d bytes; total=%d",
+			n,
+			len(request),
+		)
 
-	if n == 0 {
-		return
+		/*
+		 * HTTP request headers end with:
+		 *
+		 * \r\n\r\n
+		 */
+		if bytes.Contains(
+			request,
+			[]byte("\r\n\r\n"),
+		) {
+			break
+		}
 	}
-
-	log.Printf(
-		"Application received %d bytes",
-		n,
-	)
 
 	/*
 	 * =====================================================
@@ -273,7 +345,14 @@ func handleConnection(
 			"HELLO",
 	)
 
-	_, _ = tcpConn.Write(response)
+	_, err = tcpConn.Write(response)
+
+	if err != nil {
+		log.Printf(
+			"writing response: %v",
+			err,
+		)
+	}
 }
 
 /*
@@ -332,23 +411,27 @@ func readEvents(
 		 * causing an invalid slice.
 		 */
 
-		length := int(event.DataLen)
-
-		if length > len(event.Data) {
-			length = len(event.Data)
-		}
-
 		fmt.Printf(
 			"\n===== eBPF EVENT =====\n"+
-				"timestamp : %d\n"+
-				"cookie    : %d\n"+
-				"length    : %d\n"+
-				"data      : %q\n"+
+				"timestamp      : %d\n"+
+				"cookie         : %d\n"+
+				"skb_len        : %d\n"+
+				"inspected_len  : %d\n"+
+				"pattern_found  : %d\n"+
+				"pattern_offset : %d\n"+
+				"matcher_state_before : %d\n"+
+				"matcher_state_after  : %d\n"+
+				"stream_offset  : %d\n"+
 				"======================\n",
 			event.Timestamp,
 			event.SocketCookie,
-			length,
-			event.Data[:length],
+			event.SKBLength,
+			event.InspectedLen,
+			event.PatternFound,
+			event.PatternOffset,
+			event.MatcherStateBefore,
+			event.MatcherStateAfter,
+			event.StreamOffset,
 		)
 	}
 }
@@ -358,27 +441,3 @@ func readEvents(
  * Signal handling
  * =========================================================
  */
-
-func closeReaderOnSignal(
-	reader *ringbuf.Reader,
-) {
-
-	signalChan := make(chan os.Signal, 1)
-
-	signal.Notify(
-		signalChan,
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-
-	go func() {
-
-		<-signalChan
-
-		log.Println(
-			"Stopping...",
-		)
-
-		reader.Close()
-	}()
-}
