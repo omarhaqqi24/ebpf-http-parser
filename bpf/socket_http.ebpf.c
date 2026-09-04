@@ -5,10 +5,13 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-#define MAX_DATA_SIZE 1024
-#define MAX_INSPECT_SIZE 1024
-#define PATTERN "UNION SELECT"
-#define PATTERN_LEN (sizeof(PATTERN) - 1)
+#define INSPECT_WINDOW 2048
+#define MAX_WINDOWS 16
+#define PATTERN_LEN 7
+
+static const __u8 pattern[PATTERN_LEN] = {
+    'P','D','9','w','a','H','A'
+};
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -20,6 +23,8 @@ char LICENSE[] SEC("license") = "GPL";
 
  struct stream_state {
     __u32 pattern_pos;
+    __u32 pattern_reported;
+    __u64 stream_offset;
 };
 
 struct {
@@ -42,6 +47,8 @@ struct socket_event {
 
     __u32 matcher_state_before;
     __u32 matcher_state_after;
+
+    __u64 stream_offset;
 };
 
 
@@ -73,7 +80,7 @@ struct {
     __uint(max_entries, 64);
 
     __type(key, __u32);
-    __type(value, __u64);
+    __type(value, __u32);
 } sock_map SEC(".maps");
 
 
@@ -111,15 +118,13 @@ int socket_stream_parser(struct __sk_buff *skb)
  *
  * For now:
  *
- *     1. Read up to MAX_DATA_SIZE bytes
+ *     1. Inspect the bounded stream chunk
  *     2. Put them into a ring-buffer event
  *     3. PASS the data
  *
  * We are NOT blocking anything yet.
  * ============================================================
  */
-
-static const char pattern[] = "UNION SELECT";
 
 SEC("sk_skb/stream_verdict")
 int socket_stream_verdict(struct __sk_buff *skb)
@@ -140,68 +145,181 @@ int socket_stream_verdict(struct __sk_buff *skb)
     if (!event)
         return SK_PASS;
 
+    /*
+     * ========================================================
+     * Basic event information
+     * ========================================================
+     */
+
     event->timestamp = bpf_ktime_get_ns();
-    event->socket_cookie = bpf_get_socket_cookie(skb);
+
+    __u64 cookie = bpf_get_socket_cookie(skb);
+
+    event->socket_cookie = cookie;
     event->skb_len = skb_len;
 
     event->pattern_found = 0;
     event->pattern_offset = 0;
 
-    __u32 search_limit = skb_len;
+    /*
+     * ========================================================
+     * Get per-socket matcher state
+     * ========================================================
+     */
+    
+    struct stream_state *state;
 
-    if (search_limit > MAX_INSPECT_SIZE)
-        search_limit = MAX_INSPECT_SIZE;
+    state = bpf_map_lookup_elem(
+        &stream_states,
+        &cookie
+    );
 
-    if (search_limit < PATTERN_LEN)
+    if (!state) {
+
+        struct stream_state initial = {};
+
+        bpf_map_update_elem(
+            &stream_states,
+            &cookie,
+            &initial,
+            BPF_ANY
+        );
+
+        state = bpf_map_lookup_elem(
+            &stream_states,
+            &cookie
+        );
+
+        if (!state)
+            goto submit;
+    }
+    event->matcher_state_before = state->pattern_pos;
+    event->stream_offset = state->stream_offset;
+    /*
+    * ========================================================
+    * Bounded window inspection
+    * ========================================================
+    */
+
+    event->inspected_len = skb_len;
+
+    if (event->inspected_len > INSPECT_WINDOW * MAX_WINDOWS)
+        event->inspected_len = INSPECT_WINDOW * MAX_WINDOWS;
+
+    if (state->pattern_reported)
         goto submit;
 
-    event->inspected_len = search_limit;
-    __u32 max_offset = search_limit - PATTERN_LEN;
+    __u64 base_stream_offset = state->stream_offset;
+    __u32 stream_advance = skb_len;
 
+    __u32 window_offset = 0;
+    __u32 found = 0;
+
+    int w;
     int i;
 
-    bpf_for(i, 0, MAX_INSPECT_SIZE) {
+    bpf_for (w, 0, MAX_WINDOWS) {
 
-        if ((__u32)i > max_offset)
+        if (window_offset >= skb_len)
             break;
 
-        char buf[PATTERN_LEN];
+        __u32 remaining = skb_len - window_offset;
 
-        if (bpf_skb_load_bytes(
-            skb,
-            i,
-            buf,
-            PATTERN_LEN
-        ) < 0)
-            break;
+        __u32 window_len = remaining;
 
-        bool match = true;
+        if (window_len > INSPECT_WINDOW)
+            window_len = INSPECT_WINDOW;
 
-        int j;
 
-        bpf_for(j, 0, PATTERN_LEN) {
+        /*
+        * ====================================================
+        * Inspect one window
+        * ====================================================
+        */
 
-            if (buf[j] != pattern[j]) {
-                match = false;
+        bpf_for (i, 0, INSPECT_WINDOW) {
+
+            if ((__u32)i >= window_len)
                 break;
+
+            __u8 c;
+
+            if (bpf_skb_load_bytes(
+                skb,
+                window_offset + i,
+                &c,
+                sizeof(c)
+            ) < 0)
+                break;
+
+
+            /*
+            * Make sure the state-derived
+            * array index is bounded.
+            */
+
+            if (state->pattern_pos >= PATTERN_LEN)
+                state->pattern_pos = 0;
+
+
+            /*
+            * Continue the pattern matcher.
+            */
+
+            if (c == pattern[state->pattern_pos]) {
+
+                state->pattern_pos++;
+
+                /*
+                * Complete pattern found.
+                */
+
+                if (state->pattern_pos == PATTERN_LEN) {
+
+                    event->pattern_found = 1;
+
+                    __u64 current_stream_position =
+                        base_stream_offset +
+                        window_offset +
+                        (__u32)i;
+
+                    event->pattern_offset =
+                        current_stream_position -
+                        PATTERN_LEN +
+                        1;
+
+                    bpf_printk(
+                        "SQLi pattern found: offset=%d skb_len=%d",
+                        event->pattern_offset,
+                        skb_len
+                    );
+
+                    state->pattern_pos = 0;
+                    state->pattern_reported = 1;
+                    found = 1;
+                    break;
+                }
+
+            } else {
+
+                state->pattern_pos = 0;
             }
         }
 
-        if (match) {
-            event->pattern_found = 1;
-            event->pattern_offset = i;
-            bpf_printk(
-                "SQLi pattern found: offset=%d skb_len=%d",
-                i,
-                skb_len
-            );
+        
+        /* 
+        * Move to the next window.
+        */
+        if (found)
             break;
-        }
+
+        window_offset += window_len;
     }
 
-submit:
+    state->stream_offset += stream_advance;
+    event->matcher_state_after = state->pattern_pos;
 
-    bpf_ringbuf_submit(event, 0);
-
+    submit:
+        bpf_ringbuf_submit(event, 0);
     return SK_PASS;
 }
