@@ -3,13 +3,16 @@
         <title>WEB OMAR CIHUYYYYY</title>
     </head>
     <body>
-        <h1>Ini Website Omar</h1>
+        <h1>Ini Website Robin</h1>
         <button onclick="getRequest()">GET</button>
         <button onclick="postRequest()">POST</button>
+        <input id="xml_file" type="file" accept=".xml,text/xml,application/xml">
+        <button onclick="uploadXml()">UPLOAD XML</button>
         <div id="response_print"></div>
+        <p>Server is running on <strong>10.34.211.178:8000</strong></p>
 
         <script>
-            const API_URL = "http://10.34.211.178";
+            const API_URL = "https://10.34.211.178";
             const API_PORT = "8000"
 
             async function getRequest() {
@@ -28,8 +31,7 @@
                         console.log(`${name}: ${value}`);
                     }
 
-                    const data = await response.json();
-                    result = JSON.stringify(data, null, 2)
+                    result = await response.text();
                     
                 } catch (err) {
                     result = JSON.stringify({
@@ -55,8 +57,7 @@
                         body: requestBody
                     });
 
-                    const data = await response.json()
-                    result = JSON.stringify(data, null, 2)
+                    result = await response.text()
                 } catch (err) {
                     result = JSON.stringify({
                         "success": false,
@@ -65,6 +66,32 @@
                 }
 
                 document.getElementById("response_print").innerHTML = `<pre>${result}</pre>`
+            }
+
+            async function uploadXml() {
+                const file = document.getElementById("xml_file").files[0]
+
+                if (!file) {
+                    document.getElementById("response_print").innerHTML = "<pre>Select an XML file first.</pre>"
+                    return
+                }
+
+                try {
+                    await fetch(`${API_URL}:${API_PORT}/upload`, {
+                        method: "POST",
+                        mode: "no-cors",
+                        headers: {
+                            "Content-Type": "text/plain"
+                        },
+                        body: file
+                    });
+
+                    document.getElementById("response_print").innerHTML =
+                        `<pre>Sent ${file.name} (${file.size} bytes)</pre>`
+                } catch (err) {
+                    document.getElementById("response_print").innerHTML =
+                        `<pre>Upload failed: ${err}</pre>`
+                }
             }
         </script>
     </body>

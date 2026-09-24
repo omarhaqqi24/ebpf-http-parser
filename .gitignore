@@ -3,5 +3,5 @@ go/*.csv
 .venv/
 web/__pycache__/
 .env
-sockethttp_bpf*
 xdp_bpf*
+sockethttp_bpf*

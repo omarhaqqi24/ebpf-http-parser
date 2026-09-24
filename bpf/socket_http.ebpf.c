@@ -8,6 +8,8 @@
 #define INSPECT_WINDOW 2048
 #define MAX_WINDOWS 16
 #define PATTERN_LEN 7
+#define PREVIEW_LEN 64
+#define PAYLOAD_SIZE 4096
 
 static const __u8 pattern[PATTERN_LEN] = {
     'P','D','9','w','a','H','A'
@@ -23,7 +25,6 @@ char LICENSE[] SEC("license") = "GPL";
 
  struct stream_state {
     __u32 pattern_pos;
-    __u32 pattern_reported;
     __u64 stream_offset;
 };
 
@@ -43,12 +44,20 @@ struct socket_event {
     __u32 inspected_len;
 
     __u32 pattern_found;
-    __u32 pattern_offset;
+    __u64 pattern_offset;
 
     __u32 matcher_state_before;
     __u32 matcher_state_after;
 
     __u64 stream_offset;
+
+    __u32 before_len;
+    __u32 after_len;
+    __u8 before[PREVIEW_LEN];
+    __u8 after[PREVIEW_LEN];
+
+    __u32 payload_len;
+    __u8 payload[PAYLOAD_SIZE];
 };
 
 
@@ -68,17 +77,21 @@ struct {
  * SOCKMAP
  * ============================================================
  *
- * Userspace will insert TCP socket FDs here.
+ * Userspace inserts accepted TCP socket FDs here, keyed by FD.
  *
- * The socket inherits the parser/verdict programs
- * attached to this map.
+ * For HTTPS inspection, insert the socket only after kTLS RX has been
+ * configured on it (TCP_ULP="tls" and a TLS_RX crypto-info socket option).
+ * kTLS decrypts each TLS record before the SOCKMAP receive path invokes this
+ * stream parser/verdict, so skb bytes are HTTP plaintext rather than TLS
+ * ciphertext. This program never sees, stores, or derives TLS keys.
+ *
+ * A hash is required here: an array SOCKMAP with one fixed key overwrites the
+ * prior connection whenever another client is accepted.
  * ============================================================
  */
 struct {
-    __uint(type, BPF_MAP_TYPE_SOCKMAP);
-
-    __uint(max_entries, 64);
-
+    __uint(type, BPF_MAP_TYPE_SOCKHASH);
+    __uint(max_entries, 65536);
     __type(key, __u32);
     __type(value, __u32);
 } sock_map SEC(".maps");
@@ -145,6 +158,31 @@ int socket_stream_verdict(struct __sk_buff *skb)
     if (!event)
         return SK_PASS;
 
+    /* Ring-buffer memory is not guaranteed to be zeroed. */
+    int i;
+
+    event->timestamp = 0;
+    event->socket_cookie = 0;
+    event->skb_len = 0;
+    event->inspected_len = 0;
+    event->pattern_found = 0;
+    event->pattern_offset = 0;
+    event->matcher_state_before = 0;
+    event->matcher_state_after = 0;
+    event->stream_offset = 0;
+    event->before_len = 0;
+    event->after_len = 0;
+
+    bpf_for (i, 0, PREVIEW_LEN) {
+        event->before[i] = 0;
+        event->after[i] = 0;
+    }
+
+    event->payload_len = 0;
+
+    bpf_for (i, 0, PAYLOAD_SIZE)
+        event->payload[i] = 0;
+
     /*
      * ========================================================
      * Basic event information
@@ -160,6 +198,54 @@ int socket_stream_verdict(struct __sk_buff *skb)
 
     event->pattern_found = 0;
     event->pattern_offset = 0;
+
+    event->before_len = skb_len;
+    if (event->before_len > PREVIEW_LEN)
+        event->before_len = PREVIEW_LEN;
+
+    event->after_len = skb_len;
+    if (event->after_len > PREVIEW_LEN)
+        event->after_len = PREVIEW_LEN;
+
+    bpf_for (i, 0, PREVIEW_LEN) {
+        if ((__u32)i >= event->before_len)
+            break;
+
+        bpf_skb_load_bytes(
+            skb,
+            i,
+            &event->before[i],
+            sizeof(event->before[i])
+        );
+    }
+
+    bpf_for (i, 0, PREVIEW_LEN) {
+        if ((__u32)i >= event->after_len)
+            break;
+
+        bpf_skb_load_bytes(
+            skb,
+            skb_len - event->after_len + i,
+            &event->after[i],
+            sizeof(event->after[i])
+        );
+    }
+
+    event->payload_len = skb_len;
+    if (event->payload_len > PAYLOAD_SIZE)
+        event->payload_len = PAYLOAD_SIZE;
+
+    bpf_for (i, 0, PAYLOAD_SIZE) {
+        if ((__u32)i >= event->payload_len)
+            break;
+
+        bpf_skb_load_bytes(
+            skb,
+            i,
+            &event->payload[i],
+            sizeof(event->payload[i])
+        );
+    }
 
     /*
      * ========================================================
@@ -206,9 +292,6 @@ int socket_stream_verdict(struct __sk_buff *skb)
     if (event->inspected_len > INSPECT_WINDOW * MAX_WINDOWS)
         event->inspected_len = INSPECT_WINDOW * MAX_WINDOWS;
 
-    if (state->pattern_reported)
-        goto submit;
-
     __u64 base_stream_offset = state->stream_offset;
     __u32 stream_advance = skb_len;
 
@@ -216,7 +299,6 @@ int socket_stream_verdict(struct __sk_buff *skb)
     __u32 found = 0;
 
     int w;
-    int i;
 
     bpf_for (w, 0, MAX_WINDOWS) {
 
@@ -295,7 +377,6 @@ int socket_stream_verdict(struct __sk_buff *skb)
                     );
 
                     state->pattern_pos = 0;
-                    state->pattern_reported = 1;
                     found = 1;
                     break;
                 }

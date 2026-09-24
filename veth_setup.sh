@@ -24,3 +24,8 @@ sudo ip netns exec server ip link set lo up
 # 6. Set MTU
 sudo ip netns exec client ip link set dev veth-client mtu 500
 sudo ip netns exec server ip link set dev veth-server mtu 500
+
+# 7. Basic Command
+sudo ip netns exec client python3 php_payload.py --file cve.xml --tls
+sudo ip netns exec server ./bpf socket
+sudo ip netns exec client python3 -m http.server 8002

